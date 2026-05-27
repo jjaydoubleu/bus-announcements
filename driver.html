@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bus Announcements — Driver</title>
+<script src="/socket.io/socket.io.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #f5f4f0;
+    --surface: #ffffff;
+    --border: #e2e0d8;
+    --text: #1a1916;
+    --muted: #6b6960;
+    --accent: #d4580a;
+    --accent-light: #fff0e8;
+    --green: #1a7a4a;
+    --green-light: #e8f5ee;
+    --radius: 12px;
+  }
+
+  body {
+    font-family: Arial, Helvetica, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    position: sticky; top: 0; z-index: 10;
+  }
+
+  header .logo { font-size: 16px; font-weight: bold; }
+  header .logo span { color: var(--accent); }
+
+  .live-dot { width:8px; height:8px; border-radius:50%; background:#22c55e; margin-left:auto; animation:pulse 1.4s infinite; }
+  .live-label { font-size:12px; color:var(--muted); }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+  main {
+    max-width: 480px;
+    margin: 0 auto;
+    padding: 24px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+  }
+
+  .card-title {
+    font-size: 11px; font-weight: bold;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 16px;
+  }
+
+  .announce-btn {
+    width: 100%;
+    padding: 20px;
+    border-radius: 12px;
+    border: none;
+    font-size: 18px;
+    font-weight: bold;
+    cursor: pointer;
+    font-family: Arial, Helvetica, sans-serif;
+    margin-bottom: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    transition: opacity 0.15s, transform 0.1s;
+  }
+
+  .announce-btn:last-child { margin-bottom: 0; }
+  .announce-btn:active { transform: scale(0.97); opacity: 0.85; }
+  .announce-btn:disabled { opacity: 0.5; cursor: default; }
+
+  .btn-10min {
+    background: var(--accent);
+    color: #ffffff;
+  }
+
+  .btn-now {
+    background: var(--green);
+    color: #ffffff;
+  }
+
+  .btn-sub {
+    font-size: 12px;
+    font-weight: normal;
+    opacity: 0.85;
+  }
+
+  .status-bar {
+    background: #1a1916;
+    color: #e8e6df;
+    border-radius: var(--radius);
+    padding: 14px 18px;
+  }
+
+  .status-bar .slabel { font-size: 11px; color: #6b6860; text-transform: uppercase; letter-spacing: 0.07em; }
+  .status-bar .sval   { font-size: 14px; font-weight: bold; margin-top: 2px; }
+
+  .spinner {
+    display: inline-block; width: 18px; height: 18px;
+    border: 2px solid rgba(255,255,255,0.4);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    vertical-align: middle; margin-right: 8px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .preview-box {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    font-size: 13px;
+    color: var(--muted);
+    line-height: 1.6;
+    margin-bottom: 8px;
+  }
+
+  .preview-box strong { color: var(--text); display: block; margin-bottom: 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">&#x1F68C; Bus <span>Announcements</span></div>
+  <span class="live-label">Live</span>
+  <div class="live-dot"></div>
+</header>
+
+<main>
+
+  <div class="status-bar">
+    <div class="slabel">Last announcement</div>
+    <div class="sval" id="last-msg">None yet</div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Announcement preview</div>
+    <div class="preview-box">
+      <strong>English</strong>
+      Attention passengers. The next bus to Queenstown departs in 10 minutes. Please make your way to the carpark.
+    </div>
+    <div class="preview-box">
+      <strong>Mandarin</strong>
+      各位乘客请注意。前往皇后镇的下一班巴士将在10分钟后出发。请前往停车场。
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Trigger announcement</div>
+
+    <button class="announce-btn btn-10min" id="btn-10min" onclick="trigger('10min')">
+      &#128338; Departing in 10 minutes
+      <span class="btn-sub">English + Mandarin announcement</span>
+    </button>
+
+    <button class="announce-btn btn-now" id="btn-now" onclick="trigger('now')">
+      &#128994; Departing NOW
+      <span class="btn-sub">English + Mandarin announcement</span>
+    </button>
+
+  </div>
+
+</main>
+
+<script>
+const socket = io();
+let busy = false;
+let currentAudio = null;
+
+function playSequence(type) {
+  if (currentAudio) { currentAudio.pause(); currentAudio.currentTime = 0; }
+  const english  = new Audio('/' + type + '-english.mp3');
+  const mandarin = new Audio('/' + type + '-mandarin.mp3');
+  english.volume = 1;
+  mandarin.volume = 1;
+  english.play().catch(e => console.log('English error:', e));
+  english.onended = function() {
+    setTimeout(() => {
+      mandarin.play().catch(e => console.log('Mandarin error:', e));
+      currentAudio = mandarin;
+    }, 800);
+  };
+  currentAudio = english;
+}
+
+async function trigger(type) {
+  if (busy) return;
+  busy = true;
+
+  const btn = document.getElementById('btn-' + type);
+  const originalHTML = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Generating...';
+
+  try {
+    const res = await fetch('/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type })
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || 'Failed');
+
+    playSequence(type);
+
+    const labels = {
+      '10min': 'Departing in 10 minutes',
+      'now':   'Departing NOW'
+    };
+    document.getElementById('last-msg').textContent = labels[type] + ' — ' + new Date().toLocaleTimeString();
+    btn.innerHTML = '&#10003; Sent!';
+    setTimeout(() => {
+      btn.innerHTML = originalHTML;
+      btn.disabled = false;
+      busy = false;
+    }, 3000);
+
+  } catch(err) {
+    btn.innerHTML = '&#x2715; Error — tap to retry';
+    btn.disabled = false;
+    busy = false;
+    setTimeout(() => { btn.innerHTML = originalHTML; }, 3000);
+  }
+}
+</script>
+</body>
+</html>
